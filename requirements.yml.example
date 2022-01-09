@@ -1,0 +1,3 @@
+---
+# Example:
+# - src: git+ssh://git@gitlab.corp.yourcls.com/fc-opensystems/ansible_roles/ctrl_m_agent.git

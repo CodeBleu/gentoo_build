@@ -1,0 +1,7 @@
+---
+- name: Converge
+  hosts: all
+  tasks:
+    - name: "Include gentoo_build"
+      include_role:
+        name: "gentoo_build"

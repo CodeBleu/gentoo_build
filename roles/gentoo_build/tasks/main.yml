@@ -1,0 +1,206 @@
+---
+# tasks file for gentoo_build
+- block:
+  - name: Get gpg password from Passwordstore
+    set_fact:
+      gpg_pass: "{{ lookup('passwordstore', 'personal/gpg') }}"
+    no_log: true
+    tags: blah
+
+  - name: Creating a New GPT Partition on the PC's Main Drive
+    parted:
+      device: "{{ livecd_primary_disk }}"
+      number: 1
+      label: gpt
+      flags: [lvm]
+      state: present
+
+  - name: Check if GPG Agent is running
+    shell: ps -aux | grep -i [a]gent | awk '{print $NF}'|tr -d "-"
+    register: gpg_check
+
+  - name: Start GPG Agent
+    command: /usr/bin/gpg-agent --daemon
+    when: "not 'daemon' in gpg_check.stdout_lines"
+
+  - name: Reset GPG Agent cache
+    shell: echo RELOADAGENT | gpg-connect-agent
+
+  - name: Check if disk has been formated with LUKS
+    command: cryptsetup isLuks {{ livecd_primary_disk }}1
+    register: luks_info
+    failed_when: luks_info.rc > 1
+
+  - name: Formatting the New Partition with LUKS
+    shell: echo -n '{{ gpg_pass }}' | gpg -d -q --pinentry-mode loopback \
+      --passphrase-fd 0 \
+      --no-tty --yes {{ livecd_usb_luks_key }} | \
+      cryptsetup \
+      --cipher {{ livecd_cryptsetup_cipher }} \
+      --key-size {{ livecd_cryptsetup_key_size }} \
+      --hash {{ livecd_cryptsetup_hash }} \
+      --key-file - luksFormat {{ livecd_primary_disk }}1
+    args:
+      executable: /bin/bash
+      stdin_add_newline: false
+    no_log: true
+    when: luks_info.rc == 1
+    register: luks_formated
+
+  - name: Check if LUKS Slot 1 ( Optional passphrase ) exists
+    shell: cryptsetup luksDump {{ livecd_primary_disk }}1 \
+      | grep "Slot 1" | cut -d " " -f4
+    register: optional_slot_1
+
+  - name: Adding a Fallback Passphrase (Optional Step)
+    shell: "echo -n '{{ gpg_pass }}' | gpg -d -q --pinentry-mode loopback \
+      --passphrase-fd 0 \
+      --no-tty --yes {{ livecd_usb_luks_key }} | \
+      cryptsetup \
+      --key-file - \
+      luksAddKey {{ livecd_primary_disk }}1 <(echo -n '{{ gpg_pass }}')"
+    args:
+      executable: /bin/bash
+    no_log: true
+    when:
+      - luks_formated is defined
+      - livecd_luks_optional is defined
+      - optional_slot_1.stdout == 'DISABLED'
+
+  - name: Check if LUKS vol {{ livecd_luks_vol }} exists
+    shell: cryptsetup status {{ livecd_luks_vol }} \
+      | grep "active" | cut -d " " -f3 | tr -d "."
+    register: luks_status
+
+  - name: Open LUKS Volume
+    shell: "echo -n '{{ gpg_pass }}' | gpg -d -q --pinentry-mode loopback \
+      --passphrase-fd 0 \
+      --no-tty --yes {{ livecd_usb_luks_key }} | \
+      cryptsetup \
+      --key-file - \
+      luksOpen {{ livecd_primary_disk }}1 {{ livecd_luks_vol }}"
+    args:
+      executable: /bin/bash
+    no_log: true
+    when:
+      - luks_formated is defined
+      - not luks_status.stdout == 'active'
+    register: luks_opened
+
+  - name: Wait for LUKS Volume to open
+    wait_for:
+      timeout: 3
+
+  - name: Check if LUKS vol {{ livecd_luks_vol }} exists
+    shell: cryptsetup status {{ livecd_luks_vol }} \
+      | grep "active" | cut -d " " -f3 | tr -d "."
+    register: luks_status
+
+  - name: Create {{ livecd_lvm_vg }}
+    lvg:
+      vg: "{{ livecd_lvm_vg }}"
+      pvs: "{{ livecd_lvm_pv }}"
+    when:
+      - luks_formated is defined
+      - luks_opened is defined
+      - luks_status.stdout == 'active'
+    register: vg_created
+
+  - name: Setup LVM LVs
+    lvol:
+      vg: "{{ livecd_lvm_vg }}"
+      lv: "{{ item.key }}"
+      size: "{{ item.value.size }}"
+    loop: "{{ lookup('dict', livecd_lvm_lvs['lv']) }}"
+    when:
+      - vg_created is defined
+
+  - name: Create filesystems
+    filesystem:
+      fstype: "{{ livecd_filesystem_type }}"
+      dev: /dev/mapper/{{ livecd_lvm_vg }}-{{ item.key }}
+    loop: "{{ lookup('dict', livecd_lvm_lvs['lv']) }}"
+    when:
+      - not item.key == "swap"
+
+  - name: Create SWAP filesystem
+    filesystem:
+      fstype: swap
+      dev: /dev/mapper/{{ livecd_lvm_vg }}-swap
+
+  - name: Check if SWAP is active
+    command: swapon -s /dev/mapper/{{ livecd_lvm_vg }}-swap
+    changed_when: false
+    register: swap_status
+
+  - name: Enable SWAP
+    command: swapon /dev/mapper/{{ livecd_lvm_vg }}-swap
+    changed_when: false
+    when: "not swap_status.stdout_lines"
+
+  - name: Create Folders to mount
+    file:
+      path: /mnt/gentoo/{{ item.key }}
+      state: directory
+      mode: 0755
+    loop: "{{ lookup('dict', livecd_lvm_lvs['lv']) }}"
+    when:
+      - not item.key == "swap"
+      - not item.key == "root"
+
+  - name: Mount root filesystem
+    mount:
+      path: /mnt/gentoo
+      src: /dev/mapper/{{ livecd_lvm_vg }}-root
+      state: mounted
+      fstype: xfs
+
+  - name: Create BOOT folders
+    file:
+      path: /mnt/gentoo/boot/efi
+      state: directory
+      mode: 0755
+
+  - name: Mount non-root/swap filesystems
+    mount:
+      path: /mnt/gentoo/{{ item.key }}
+      src: /dev/mapper/{{ livecd_lvm_vg }}-{{ item.key }}
+      state: mounted
+      fstype: xfs
+    loop: "{{ lookup('dict', livecd_lvm_lvs['lv']) }}"
+    when:
+      - not item.key == "swap"
+      - not item.key == "root"
+
+  - name: Get PARTUUID
+    shell: blkid  {{ item }}1 \
+      | grep -ioP 'partuuid=\"\K([\w\d-]+)'
+    register: partuuid_stats
+    with_items:
+      - "{{ livecd_primary_disk }}"
+      - "{{ livecd_boot_efi_usb }}"
+    changed_when: false
+    ignore_errors: true
+
+  - name: Set Facts for PARTUUID  # noqa var-naming
+    set_fact:
+      livecd_{{ item.item.split('/')[2] }}_partuuid: "{{ item.stdout }}"
+    with_items:
+      - "{{ partuuid_stats.results }}"
+
+  - name: debug
+    debug:
+      msg: "{{ livecd_sda_partuuid }}"
+
+  # - name: Set PARTUUID fact for LUKS volume
+  #   set_fact:
+  #     livecd_luks_partuuid: "{{ primary_disk_partuuid.stdout }}"
+  #
+  # - debug:
+  #     msg: "{{ livecd_luks_partuuid }}"
+
+  # - name: Set PARTUUID fact for EFI boot USB
+  #   set_fact:
+  #     livecd_usb_partuuid: "{{ livecd_boot_efi_usb }}1"
+
+  when: inventory_hostname == "livecd"

@@ -1,0 +1,28 @@
+---
+# defaults file for gentoo_build
+livecd_boot_efi_usb: "/dev/sdc"
+livecd_primary_disk: "/dev/sda"
+# livecd_usb_luks_key: "/mnt/usb/luks-key.gpg"
+livecd_usb_luks_key: "/root/luks-key.gpg"
+livecd_cryptsetup_cipher: serpent-xts-plain64
+livecd_cryptsetup_key_size: 512
+livecd_cryptsetup_hash: whirlpool
+livecd_luks_optional: false
+livecd_luks_vol: gentoo
+livecd_filesystem_type: xfs
+livecd_lvm_vg: vg1
+livecd_lvm_pv: /dev/mapper/gentoo
+livecd_lvm_lvs:
+  lv:
+    swap:
+      size: 17G
+    root:
+      size: 50G
+    home:
+      size: 30G
+    opt:
+      size: 10G
+    temp:
+      size: 5G
+    var:
+      size: 10G

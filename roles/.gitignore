@@ -1,0 +1,9 @@
+*/
+
+!/.gitignore
+!/.requirements.yml
+
+!/gentoo_build/
+!/gentoo_build/**
+
+*.swp
