@@ -6,6 +6,7 @@ livecd_primary_disk: "/dev/sda"
 livecd_usb_luks_key: "/root/luks-key.gpg"
 livecd_cryptsetup_cipher: serpent-xts-plain64
 livecd_cryptsetup_key_size: 512
+livecd_luks_discards: "--allow-discards"  # enable with: --allow-discards
 livecd_cryptsetup_hash: whirlpool
 livecd_luks_optional: false
 livecd_luks_vol: gentoo
@@ -17,7 +18,7 @@ livecd_lvm_lvs:
     swap:
       size: 17G
     root:
-      size: 50G
+      size: 5G
     home:
       size: 30G
     opt:
@@ -25,4 +26,14 @@ livecd_lvm_lvs:
     temp:
       size: 5G
     var:
-      size: 10G
+      size: 20G
+
+livecd_stage3_url: https://gentoo.osuosl.org/releases/amd64/autobuilds
+livecd_stage3_date: 20220109T170538Z
+
+livecd_release_fingerprint: 13EBBDBEDE7A12775DFDB1BABB572E0E2D182910
+
+livecd_make_cpu_flags: "mmx mmxext sse sse2"
+livecd_video_card: "intel vesa"
+# ls /usr/share/zoneinfo
+livecd_timezone: "US/Eastern"
