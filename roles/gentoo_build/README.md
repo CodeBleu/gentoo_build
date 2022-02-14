@@ -18,6 +18,10 @@ Requirements
         psk="<password>"
     }
 
+### Wipe all partitions on dest
+
+make sure you remove all partitions on drive so role with create the primary partition correctly
+
 ### set password for root
 
 livecd ~#: `passwd`

@@ -1,7 +1,12 @@
 ---
 # defaults file for gentoo_build
-livecd_boot_efi_usb: "/dev/sdc"
-livecd_primary_disk: "/dev/sda"
+livecd_boot_efi_usb: "/dev/sdb"
+livecd_boot_efi_usb_partition: "{{ livecd_boot_efi_usb }}1"
+#livecd_primary_disk: "/dev/sda"
+livecd_primary_disk: "/dev/nvme0n1"
+# NVME partions are 'p1', not '1', so below is used for non-nvme disks
+# Playbook has set_fact to set this variable correctly for NVME disks
+livecd_primary_disk_partition: "{{ livecd_primary_disk }}1"
 # livecd_usb_luks_key: "/mnt/usb/luks-key.gpg"
 livecd_usb_luks_key: "/root/luks-key.gpg"
 livecd_cryptsetup_cipher: serpent-xts-plain64

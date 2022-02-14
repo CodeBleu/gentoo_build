@@ -2,6 +2,7 @@
 - name: Deploy gentoo_build
   hosts: all
   become: true
+  gather_facts: true
 
   pre_tasks:
     - name: Check if requirements.yml files exists

@@ -1,0 +1,157 @@
+---
+
+- name: check if .git exists in repo path
+  stat:
+    path: /var/db/repos/gentoo/.git
+  register: git_repo
+  tags: portage
+
+- name: install a Portage (repository tree) snapshot
+  command: "emaint sync --auto"
+  register: portage_snapshot
+  when: not git_repo.stat.exists
+  tags: portage
+
+# gentoolkit needed for ansible package manager to work
+- name: Install gentoolkit
+  command: emerge gentoolkit
+  changed_when: false
+  tags: portage
+
+- name: Install misc packages
+  package:
+    name: "{{ item }}"
+    state: present
+  with_items:
+    - vim
+    - curl
+    - tmux
+  tags: packages
+
+- name: Install Git
+  package:
+    name: dev-vcs/git
+    state: installed
+  when: not git_repo.stat.exists
+  tags: portage
+
+- name: Replace gentoo.conf file (git)
+  copy:
+    src: gentoo-git.conf
+    dest: /etc/portage/repos.conf/gentoo.conf
+    mode: 0644
+  when: not git_repo.stat.exists
+  tags: portage
+
+- name: Clean repo for Git usage
+  file:
+    path: /var/db/repos/gentoo
+    state: absent
+  when: not git_repo.stat.exists
+  tags: portage
+
+- name: Update emaint sync after switch to Git
+  command: "emaint sync --auto"
+  register: portage_snapshot
+  when: not git_repo.stat.exists
+  tags: portage
+
+- name: Update Portage
+  package:
+    name: portage
+    oneshot: true
+    state: latest
+  tags: portage
+
+- name: Sync and Update @world
+  portage:
+    package: '@world'
+    update: "true"
+    deep: "true"
+    newuse: "true"
+    sync: "yes"
+  tags: portage,update_world
+
+- name: Remove unneeded packages
+  portage:
+    depclean: true
+  tags: portage,update_world
+
+- name: Setup Timezone
+  template:
+    src: timezone.j2
+    dest: /etc/timezone
+    owner: root
+    group: root
+    mode: '0644'
+  tags: time_locale
+
+- name: Reconfigure Timezone-data package
+  command: emerge --config sys-libs/timezone-data
+  changed_when: false
+  tags: time_locale
+
+- name: Append locale info
+  lineinfile:
+    path: /etc/locale.gen
+    line: "{{ item }}"
+    create: true
+    mode: 0644
+  with_items:
+    - en_US ISO-8859-1
+    - en_US.UTF-8 UTF-8
+  tags: time_locale
+
+- name: Initially set locale to "C"
+  command: eselect locale set "C"
+  changed_when: false
+  tags: time_locale
+
+- name: Reset ssh connection
+  meta: reset_connection
+  tags: time_locale
+
+- name: Install cpuid2cpuflags
+  package:
+    name: app-portage/cpuid2cpuflags
+    oneshot: true
+    state: present
+  tags: cpu
+
+- name: Run cpuid2cpuflags
+  command: cpuid2cpuflags
+  changed_when: false
+  register: cpuid
+  tags: cpu
+
+- name: Append cpu flags to make.conf
+  replace:
+    path: /etc/portage/make.conf
+    regexp: '^CPU_FLAGS_X86.*$'
+    replace: "CPU_FLAGS_X86=\"{{ cpuid.stdout.split(':')[1] }}\""
+  tags: cpu
+
+- name: Select Desktop Profile
+  command: eselect profile set "default/linux/amd64/17.1/desktop"
+  changed_when: false
+  tags: profile
+
+- name: Sync and Update @world
+  portage:
+    package: '@world'
+    update: "true"
+    deep: "true"
+    newuse: "true"
+    sync: "yes"
+  tags: profile
+
+- name: Test eselect in (chroot)
+  command: eselect news list
+  register: eselect_test
+  changed_when: false
+  tags: portage
+
+- name: debug - eselect test
+  debug:
+    msg: "{{ eselect_test }}"
+  tags: portage
