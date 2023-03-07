@@ -1,25 +1,26 @@
 ---
 
-- name: check if .git exists in repo path
-  stat:
+- name: Check if .git exists in repo path
+  ansible.builtin.stat:
     path: /var/db/repos/gentoo/.git
   register: git_repo
   tags: portage
 
-- name: install a Portage (repository tree) snapshot
-  command: "emaint sync --auto"
+- name: Install a Portage (repository tree) snapshot
+  ansible.builtin.command: "emaint sync --auto"
   register: portage_snapshot
+  changed_when: false
   when: not git_repo.stat.exists
   tags: portage
 
 # gentoolkit needed for ansible package manager to work
 - name: Install gentoolkit
-  command: emerge gentoolkit
+  ansible.builtin.command: emerge gentoolkit
   changed_when: false
   tags: portage
 
 - name: Install misc packages
-  package:
+  ansible.builtin.package:
     name: "{{ item }}"
     state: present
   with_items:
@@ -29,14 +30,14 @@
   tags: packages
 
 - name: Install Git
-  package:
+  ansible.builtin.package:
     name: dev-vcs/git
     state: installed
   when: not git_repo.stat.exists
   tags: portage
 
 - name: Replace gentoo.conf file (git)
-  copy:
+  ansible.builtin.copy:
     src: gentoo-git.conf
     dest: /etc/portage/repos.conf/gentoo.conf
     mode: 0644
@@ -44,27 +45,28 @@
   tags: portage
 
 - name: Clean repo for Git usage
-  file:
+  ansible.builtin.file:
     path: /var/db/repos/gentoo
     state: absent
   when: not git_repo.stat.exists
   tags: portage
 
 - name: Update emaint sync after switch to Git
-  command: "emaint sync --auto"
+  ansible.builtin.command: "emaint sync --auto"
   register: portage_snapshot
+  changed_when: false
   when: not git_repo.stat.exists
   tags: portage
 
-- name: Update Portage
-  package:
+- name: Update Portage  # noqa package-latest
+  ansible.builtin.package:
     name: portage
     oneshot: true
     state: latest
   tags: portage
 
 - name: Sync and Update @world
-  portage:
+  community.general.portage:
     package: '@world'
     update: "true"
     deep: "true"
@@ -73,12 +75,12 @@
   tags: portage,update_world
 
 - name: Remove unneeded packages
-  portage:
+  community.general.portage:
     depclean: true
   tags: portage,update_world
 
 - name: Setup Timezone
-  template:
+  ansible.builtin.template:
     src: timezone.j2
     dest: /etc/timezone
     owner: root
@@ -87,12 +89,12 @@
   tags: time_locale
 
 - name: Reconfigure Timezone-data package
-  command: emerge --config sys-libs/timezone-data
+  ansible.builtin.command: emerge --config sys-libs/timezone-data
   changed_when: false
   tags: time_locale
 
 - name: Append locale info
-  lineinfile:
+  ansible.builtin.lineinfile:
     path: /etc/locale.gen
     line: "{{ item }}"
     create: true
@@ -103,41 +105,41 @@
   tags: time_locale
 
 - name: Initially set locale to "C"
-  command: eselect locale set "C"
+  ansible.builtin.command: eselect locale set "C"
   changed_when: false
   tags: time_locale
 
 - name: Reset ssh connection
-  meta: reset_connection
+  ansible.builtin.meta: reset_connection
   tags: time_locale
 
 - name: Install cpuid2cpuflags
-  package:
+  ansible.builtin.package:
     name: app-portage/cpuid2cpuflags
     oneshot: true
     state: present
   tags: cpu
 
 - name: Run cpuid2cpuflags
-  command: cpuid2cpuflags
+  ansible.builtin.command: cpuid2cpuflags
   changed_when: false
   register: cpuid
   tags: cpu
 
 - name: Append cpu flags to make.conf
-  replace:
+  ansible.builtin.replace:
     path: /etc/portage/make.conf
     regexp: '^CPU_FLAGS_X86.*$'
     replace: "CPU_FLAGS_X86=\"{{ cpuid.stdout.split(':')[1] }}\""
   tags: cpu
 
 - name: Select Desktop Profile
-  command: eselect profile set "default/linux/amd64/17.1/desktop"
+  ansible.builtin.command: eselect profile set "default/linux/amd64/17.1/desktop"
   changed_when: false
   tags: profile
 
 - name: Sync and Update @world
-  portage:
+  community.general.portage:
     package: '@world'
     update: "true"
     deep: "true"
@@ -146,12 +148,12 @@
   tags: profile
 
 - name: Test eselect in (chroot)
-  command: eselect news list
+  ansible.builtin.command: eselect news list
   register: eselect_test
   changed_when: false
   tags: portage
 
-- name: debug - eselect test
-  debug:
+- name: Debug - eselect test
+  ansible.builtin.debug:
     msg: "{{ eselect_test }}"
   tags: portage

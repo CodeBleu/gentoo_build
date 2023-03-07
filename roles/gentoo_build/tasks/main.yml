@@ -1,15 +1,15 @@
 ---
 - name: Is chroot setup in ssh
-  lineinfile:
+  ansible.builtin.lineinfile:
     dest: /etc/ssh/sshd_config
     line: "chroot"
   check_mode: true
   register: chroot_enabled
 
 - name: Before chroot
-  include: before_chroot.yml
+  ansible.builtin.include_tasks: before_chroot.yml
   when: not chroot_enabled
 
 - name: Include After chroot stuff
-  include: after_chroot.yml
+  ansible.builtin.include_tasks: after_chroot.yml
   when: chroot_enabled

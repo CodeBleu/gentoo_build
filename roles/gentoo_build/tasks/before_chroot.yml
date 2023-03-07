@@ -1,449 +1,478 @@
 ---
 # tasks file for gentoo_build
-- block:
-  - name: Get gpg password from Passwordstore
-    set_fact:
-      gpg_pass: "{{ lookup('passwordstore', 'personal/gpg') }}"
-    no_log: true
+- name: Get gpg password from Passwordstore
+  ansible.builtin.set_fact:
+    gpg_pass: "{{ lookup('passwordstore', 'personal/gpg') }}"
+  no_log: true
 
-  - name: Read device info
-    parted: device="{{ livecd_primary_disk }}"
-    register: disk_info
+- name: Read device info
+  community.general.parted:
+    device: "{{ livecd_primary_disk }}"
+  register: disk_info
 
-  - name: Check for NVME drive
-    set_fact:
-      nvme: true
-    loop: "{{ lookup('dict', ansible_device_links.ids) }}"
-    tags: uuid
-    when: "'nvme' in item.key"
+- name: Check for NVME drive
+  ansible.builtin.set_fact:
+    nvme: true
+  loop: "{{ lookup('dict', ansible_device_links.ids) }}"
+  tags: uuid
+  when: "'nvme' in item.key"
 
-  - name: Set partition for NVME
-    set_fact:
-      livecd_primary_disk_partition: "{{ livecd_primary_disk }}p1"
-    tags: uuid
-    when: nvme
+- name: Set partition for NVME
+  ansible.builtin.set_fact:
+    livecd_primary_disk_partition: "{{ livecd_primary_disk }}p1"
+  tags: uuid
+  when: nvme
 
-  - name: Creating a New GPT Partition on the PC's Main Drive
-    parted:
-      device: "{{ livecd_primary_disk }}"
-      number: 1
-      label: gpt
-      flags: [lvm]
-      state: present
-    when: not nvme
+- name: Creating a New GPT Partition on the PC's Main Drive
+  community.general.parted:
+    device: "{{ livecd_primary_disk }}"
+    number: 1
+    label: gpt
+    flags: [lvm]
+    state: present
+  when: not nvme
 
-  - name: check if NVME part exists
-    shell: parted {{ livecd_primary_disk }} print 1 &> /dev/null echo %?
-    register: partition_stats
+- name: Check if NVME part exists
+  ansible.builtin.shell: >
+    parted {{ livecd_primary_disk }} print 1 &> /dev/null echo %?
+  changed_when: false
+  register: partition_stats
 
-  - name: Partition NVME drives, because 'parted' module can't
-    command: parted -s "{{ livecd_primary_disk }}" unit mib mkpart primary 1 100% set 1 lvm on
-    when:
-      - nvme
-      - partition_stats.rc != 0
+- name: Partition NVME drives, because 'parted' module can't
+  ansible.builtin.command: >
+    parted -s "{{ livecd_primary_disk }}"
+    unit mib mkpart primary 1 100% set 1 lvm on
+  changed_when: false
+  when:
+    - nvme
+    - partition_stats.rc != 0
 
-  - name: Check if GPG Agent is running
-    shell: ps -aux | grep -i [a]gent | awk '{print $NF}'|tr -d "-"
-    register: gpg_check
+- name: Check if GPG Agent is running
+  ansible.builtin.shell: set -o pipefail; ps -aux | \
+    grep -i [a]gent | awk '{print $NF}'|tr -d "-"
+  changed_when: false
+  register: gpg_check
 
-  - name: Start GPG Agent
-    command: /usr/bin/gpg-agent --daemon
-    when: "not 'daemon' in gpg_check.stdout_lines"
+- name: Start GPG Agent
+  ansible.builtin.command: /usr/bin/gpg-agent --daemon
+  changed_when: false
+  when: "not 'daemon' in gpg_check.stdout_lines"
 
-  - name: Reset GPG Agent cache
-    shell: echo RELOADAGENT | gpg-connect-agent
+- name: Reset GPG Agent cache
+  ansible.builtin.shell: set -o pipefail; echo RELOADAGENT | gpg-connect-agent
+  changed_when: false
 
-  - name: Check if disk has been formated with LUKS
-    command: cryptsetup isLuks {{ livecd_primary_disk_partition }}
-    register: luks_info
-    failed_when: luks_info.rc > 1
+- name: Check if disk has been formated with LUKS
+  ansible.builtin.command: cryptsetup isLuks {{ livecd_primary_disk_partition }}
+  register: luks_info
+  changed_when: false
+  failed_when: luks_info.rc > 1
 
-  - name: Formatting the New Partition with LUKS
-    shell: echo -n '{{ gpg_pass }}' | gpg -d -q --pinentry-mode loopback \
-      --passphrase-fd 0 \
-      --no-tty --yes {{ livecd_usb_luks_key }} | \
-      cryptsetup \
-      --cipher {{ livecd_cryptsetup_cipher }} \
-      --key-size {{ livecd_cryptsetup_key_size }} \
-      --hash {{ livecd_cryptsetup_hash }} \
-      --key-file - luksFormat {{ livecd_primary_disk_partition }}
-    args:
-      executable: /bin/bash
-      stdin_add_newline: false
-    no_log: true
-    when: luks_info.rc == 1
-    register: luks_formated
+- name: Formatting the New Partition with LUKS
+  ansible.builtin.shell: set -o pipefail; echo -n '{{ gpg_pass }}' | \
+    gpg -d -q --pinentry-mode loopback \
+    --passphrase-fd 0 \
+    --no-tty --yes {{ livecd_usb_luks_key }} | \
+    cryptsetup \
+    --cipher {{ livecd_cryptsetup_cipher }} \
+    --key-size {{ livecd_cryptsetup_key_size }} \
+    --hash {{ livecd_cryptsetup_hash }} \
+    --key-file - luksFormat {{ livecd_primary_disk_partition }}
+  args:
+    executable: /bin/bash
+    stdin_add_newline: false
+  no_log: true
+  changed_when: false
+  when: luks_info.rc == 1
+  register: luks_formated
 
-  - name: Check if LUKS Slot 1 ( Optional passphrase ) exists
-    shell: cryptsetup luksDump {{ livecd_primary_disk_partition }} \
-      | grep "Slot 1" | cut -d " " -f4
-    register: optional_slot_1
+- name: Check if LUKS Slot 1 ( Optional passphrase ) exists
+  ansible.builtin.shell: set -o pipefail; \
+    cryptsetup luksDump {{ livecd_primary_disk_partition }} \
+    | grep "Slot 1" | cut -d " " -f4
+  changed_when: false
+  register: optional_slot_1
 
-  - name: Adding a Fallback Passphrase (Optional Step)
-    shell: "echo -n '{{ gpg_pass }}' | gpg -d -q --pinentry-mode loopback \
-      --passphrase-fd 0 \
-      --no-tty --yes {{ livecd_usb_luks_key }} | \
-      cryptsetup \
-      --key-file - \
-      luksAddKey {{ livecd_primary_disk_partition }} <(echo -n '{{ gpg_pass }}')"
-    args:
-      executable: /bin/bash
-    no_log: true
-    when:
-      - luks_formated is defined
-      - livecd_luks_optional is defined
-      - optional_slot_1.stdout == 'DISABLED'
+- name: Adding a Fallback Passphrase (Optional Step)
+  ansible.builtin.shell: "set -o pipefail;
+    echo -n '{{ gpg_pass }}' | gpg -d -q --pinentry-mode loopback \
+    --passphrase-fd 0 \
+    --no-tty --yes {{ livecd_usb_luks_key }} | \
+    cryptsetup \
+    --key-file - \
+    luksAddKey {{ livecd_primary_disk_partition }} <(echo -n '{{ gpg_pass }}')"
+  args:
+    executable: /bin/bash
+  no_log: true
+  changed_when: false
+  when:
+    - luks_formated is defined
+    - livecd_luks_optional is defined
+    - optional_slot_1.stdout == 'DISABLED'
 
-  - name: Check if LUKS vol {{ livecd_luks_vol }} exists
-    shell: cryptsetup status {{ livecd_luks_vol }} \
-      | grep "active" | cut -d " " -f3 | tr -d "."
-    register: luks_status
+- name: Check if LUKS vol exists - {{ livecd_luks_vol }}
+  ansible.builtin.shell: set -o pipefail; \
+    cryptsetup status {{ livecd_luks_vol }} \
+    | grep "active" | cut -d " " -f3 | tr -d "."
+  changed_when: false
+  register: luks_status
 
-  - name: Open LUKS Volume
-    shell: "echo -n '{{ gpg_pass }}' | gpg -d -q --pinentry-mode loopback \
-      --passphrase-fd 0 \
-      --no-tty --yes {{ livecd_usb_luks_key }} | \
-      cryptsetup \
-      --key-file - \
-      luksOpen {{ livecd_primary_disk_partition }} \
-      {{ livecd_luks_discards }} {{ livecd_luks_vol }}"
-    args:
-      executable: /bin/bash
-    no_log: true
-    when:
-      - luks_formated is defined
-      - not luks_status.stdout == 'active'
-    register: luks_opened
+- name: Open LUKS Volume
+  ansible.builtin.shell: "set -o pipefail;
+    echo -n '{{ gpg_pass }}' | gpg -d -q --pinentry-mode loopback \
+    --passphrase-fd 0 \
+    --no-tty --yes {{ livecd_usb_luks_key }} | \
+    cryptsetup \
+    --key-file - \
+    luksOpen {{ livecd_primary_disk_partition }} \
+    {{ livecd_luks_discards }} {{ livecd_luks_vol }}"
+  args:
+    executable: /bin/bash
+  no_log: true
+  changed_when: false
+  when:
+    - luks_formated is defined
+    - not luks_status.stdout == 'active'
+  register: luks_opened
 
-  - name: Wait for LUKS Volume to open
-    wait_for:
-      timeout: 3
+- name: Wait for LUKS Volume to open
+  ansible.builtin.wait_for:
+    timeout: 3
 
-  - name: Check if LUKS vol {{ livecd_luks_vol }} exists
-    shell: cryptsetup status {{ livecd_luks_vol }} \
-      | grep "active" | cut -d " " -f3 | tr -d "."
-    register: luks_status
+- name: Check if LUKS vol exists - {{ livecd_luks_vol }}
+  ansible.builtin.shell: set -o pipefail; \
+    cryptsetup status {{ livecd_luks_vol }} \
+    | grep "active" | cut -d " " -f3 | tr -d "."
+  changed_when: false
+  register: luks_status
 
-  - name: Create {{ livecd_lvm_vg }}
-    lvg:
-      vg: "{{ livecd_lvm_vg }}"
-      pvs: "{{ livecd_lvm_pv }}"
-    when:
-      - luks_formated is defined
-      - luks_opened is defined
-      - luks_status.stdout == 'active'
-    register: vg_created
+- name: Create {{ livecd_lvm_vg }}
+  community.general.lvg:
+    vg: "{{ livecd_lvm_vg }}"
+    pvs: "{{ livecd_lvm_pv }}"
+  when:
+    - luks_formated is defined
+    - luks_opened is defined
+    - luks_status.stdout == 'active'
+  register: vg_created
 
-  - name: Setup LVM LVs
-    lvol:
-      vg: "{{ livecd_lvm_vg }}"
-      lv: "{{ item.key }}"
-      size: "{{ item.value.size }}"
-    loop: "{{ lookup('dict', livecd_lvm_lvs['lv']) }}"
-    when:
-      - vg_created is defined
+- name: Setup LVM LVs
+  community.general.lvol:
+    vg: "{{ livecd_lvm_vg }}"
+    lv: "{{ item.key }}"
+    size: "{{ item.value.size }}"
+  loop: "{{ lookup('dict', livecd_lvm_lvs['lv']) }}"
+  when:
+    - vg_created is defined
 
-  - name: Create filesystems
-    filesystem:
-      fstype: "{{ livecd_filesystem_type }}"
-      dev: /dev/mapper/{{ livecd_lvm_vg }}-{{ item.key }}
-    loop: "{{ lookup('dict', livecd_lvm_lvs['lv']) }}"
-    when:
-      - not item.key == "swap"
+- name: Create filesystems
+  community.general.filesystem:
+    fstype: "{{ livecd_filesystem_type }}"
+    dev: /dev/mapper/{{ livecd_lvm_vg }}-{{ item.key }}
+  loop: "{{ lookup('dict', livecd_lvm_lvs['lv']) }}"
+  when:
+    - not item.key == "swap"
 
-  - name: Create SWAP filesystem
-    filesystem:
-      fstype: swap
-      dev: /dev/mapper/{{ livecd_lvm_vg }}-swap
+- name: Create SWAP filesystem
+  community.general.filesystem:
+    fstype: swap
+    dev: /dev/mapper/{{ livecd_lvm_vg }}-swap
 
-  - name: Check if SWAP is active
-    command: swapon -s /dev/mapper/{{ livecd_lvm_vg }}-swap
-    changed_when: false
-    register: swap_status
+- name: Check if SWAP is active
+  ansible.builtin.command: swapon -s /dev/mapper/{{ livecd_lvm_vg }}-swap
+  changed_when: false
+  register: swap_status
 
-  - name: Enable SWAP
-    command: swapon /dev/mapper/{{ livecd_lvm_vg }}-swap
-    changed_when: false
-    when: "not swap_status.stdout_lines"
+- name: Enable SWAP
+  ansible.builtin.command: swapon /dev/mapper/{{ livecd_lvm_vg }}-swap
+  changed_when: false
+  when: "not swap_status.stdout_lines"
 
-  - name: Create Folders to mount
-    file:
-      path: /mnt/gentoo/{{ item.key }}
-      state: directory
-      mode: 0755
-    loop: "{{ lookup('dict', livecd_lvm_lvs['lv']) }}"
-    when:
-      - not item.key == "swap"
-      - not item.key == "root"
+- name: Create Folders to mount
+  ansible.builtin.file:
+    path: /mnt/gentoo/{{ item.key }}
+    state: directory
+    mode: 0755
+  loop: "{{ lookup('dict', livecd_lvm_lvs['lv']) }}"
+  when:
+    - not item.key == "swap"
+    - not item.key == "root"
 
-  - name: Mount root filesystem
-    mount:
-      path: /mnt/gentoo
-      src: /dev/mapper/{{ livecd_lvm_vg }}-root
-      state: mounted
-      fstype: xfs
+- name: Mount root filesystem
+  ansible.posix.mount:
+    path: /mnt/gentoo
+    src: /dev/mapper/{{ livecd_lvm_vg }}-root
+    state: mounted
+    fstype: xfs
 
-  - name: Create BOOT folders
-    file:
-      path: /mnt/gentoo/boot/efi
-      state: directory
-      mode: 0755
+- name: Create BOOT folders
+  ansible.builtin.file:
+    path: /mnt/gentoo/boot/efi
+    state: directory
+    mode: 0755
 
-  - name: Mount non-root/swap filesystems
-    mount:
-      path: /mnt/gentoo/{{ item.key }}
-      src: /dev/mapper/{{ livecd_lvm_vg }}-{{ item.key }}
-      state: mounted
-      fstype: xfs
-    loop: "{{ lookup('dict', livecd_lvm_lvs['lv']) }}"
-    when:
-      - not item.key == "swap"
-      - not item.key == "root"
+- name: Mount non-root/swap filesystems
+  ansible.posix.mount:
+    path: /mnt/gentoo/{{ item.key }}
+    src: /dev/mapper/{{ livecd_lvm_vg }}-{{ item.key }}
+    state: mounted
+    fstype: xfs
+  loop: "{{ lookup('dict', livecd_lvm_lvs['lv']) }}"
+  when:
+    - not item.key == "swap"
+    - not item.key == "root"
 
-  - name: Get PARTUUID
-    shell: blkid  {{ item }} \
-      | grep -ioP 'partuuid=\"\K([\w\d-]+)'
-    register: partuuid_stats
-    with_items:
-      - "{{ livecd_primary_disk_partition }}"
-      - "{{ livecd_boot_efi_usb_partition }}"
-    changed_when: false
-    ignore_errors: true
-    tags: uuid
+- name: Get PARTUUID
+  ansible.builtin.shell: blkid  {{ item }} \
+    | grep -ioP 'partuuid=\"\K([\w\d-]+)'
+  register: partuuid_stats
+  with_items:
+    - "{{ livecd_primary_disk_partition }}"
+    - "{{ livecd_boot_efi_usb_partition }}"
+  changed_when: false
+  ignore_errors: true
+  tags: uuid
 
-  - name: Set primary drive PARTUUID fact
-    set_fact:
-        primary_partuuid: "{{ partuuid_stats.results[0].stdout }}"
-    tags: uuid
+- name: Set primary drive PARTUUID fact
+  ansible.builtin.set_fact:
+    primary_partuuid: "{{ partuuid_stats.results[0].stdout }}"
+  tags: uuid
 
-  - name: Set boot drive PARTUUID fact
-    set_fact:
-        boot_partuuid: "{{ partuuid_stats.results[1].stdout }}"
-    tags: uuid
+- name: Set boot drive PARTUUID fact
+  ansible.builtin.set_fact:
+    boot_partuuid: "{{ partuuid_stats.results[1].stdout }}"
+  tags: uuid
 
-  - name: show boot PARTUUID
-    debug: var=boot_partuuid
-    tags: uuid
+- name: Show boot PARTUUID
+  ansible.builtin.debug:
+    var: boot_partuuid
+  tags: uuid
 
-  - name: show primary PARTUUID
-    debug: var=primary_partuuid
-    tags: uuid
+- name: Show primary PARTUUID
+  ansible.builtin.debug:
+    var: primary_partuuid
+  tags: uuid
 
-  - name: Downloading, Verifying and Unpacking the Gentoo Stage 3 Tarball
-    get_url:
-      url: "{{ livecd_stage3_url }}/{{ livecd_stage3_date }}/{{ item }}"
-      dest: /mnt/gentoo/{{ item }}
-    with_items:
-      - stage3-amd64-openrc-{{ livecd_stage3_date }}.tar.xz.DIGESTS
-      - stage3-amd64-openrc-{{ livecd_stage3_date }}.tar.xz.DIGESTS.asc
-      - stage3-amd64-openrc-{{ livecd_stage3_date }}.tar.xz.CONTENTS.gz
-      - stage3-amd64-openrc-{{ livecd_stage3_date }}.tar.xz
-    register: download_stuff
-    loop_control:
-      pause: 10
-    tags: download_stage3
+- name: Downloading, Verifying and Unpacking the Gentoo Stage 3 Tarball
+  ansible.builtin.get_url:
+    url: "{{ livecd_stage3_url }}/{{ livecd_stage3_date }}/{{ item }}"
+    dest: /mnt/gentoo/{{ item }}
+    mode: '0755'
+  with_items:
+    - stage3-amd64-openrc-{{ livecd_stage3_date }}.tar.xz.DIGESTS
+    - stage3-amd64-openrc-{{ livecd_stage3_date }}.tar.xz.DIGESTS.asc
+    - stage3-amd64-openrc-{{ livecd_stage3_date }}.tar.xz.CONTENTS.gz
+    - stage3-amd64-openrc-{{ livecd_stage3_date }}.tar.xz
+  register: download_stuff
+  loop_control:
+    pause: 10
+  tags: download_stage3
 
-  # https://www.gentoo.org/downloads/signatures/
-  - name: Install Gentoo weekly release public key
-    command: gpg --keyserver hkps://keys.gentoo.org \
-      --recv-key 2D182910
-    register: install_gentoo_release_key
-    changed_when: "'imported' in install_gentoo_release_key.stderr"
-    tags: ["verify_digest", "unpack_stage3"]
+# https://www.gentoo.org/downloads/signatures/
+- name: Install Gentoo weekly release public key
+  ansible.builtin.command: gpg --keyserver hkps://keys.gentoo.org \
+    --recv-key 2D182910
+  register: install_gentoo_release_key
+  changed_when: "'imported' in install_gentoo_release_key.stderr"
+  tags: ["verify_digest", "unpack_stage3"]
 
-  - name: Get full key fingerprint
-    shell: gpg -k | grep -a1 pub | grep -vP "\-|pub" | tr -d " "
-    register: release_fingerprint_stat
-    changed_when: false
-    tags: ["verify_digest", "unpack_stage3"]
+- name: Get full key fingerprint
+  ansible.builtin.shell: set -o pipefail; \
+    gpg -k | grep -a1 pub | grep -vP "\-|pub" | tr -d " "
+  register: release_fingerprint_stat
+  changed_when: false
+  tags: ["verify_digest", "unpack_stage3"]
 
-  - name: Verify DIGESTS.asc file
-    shell: 'gpg --verify /mnt/gentoo/stage3-amd64-openrc-{{
-      livecd_stage3_date }}.tar.xz.DIGESTS.asc 2>&1 >/dev/null |
-      grep -iP "good"'
-    when:
-      - release_fingerprint_stat.stdout == livecd_release_fingerprint
-    register: verify_digest
-    failed_when: "not 'Good signature' in verify_digest.stdout"
-    changed_when: "not 'Good signature' in verify_digest.stdout"
-    tags: ["verify_digest", "unpack_stage3"]
+- name: Verify DIGESTS.asc file
+  ansible.builtin.shell: 'set -o pipefail;
+    gpg --verify /mnt/gentoo/stage3-amd64-openrc-{{
+    livecd_stage3_date }}.tar.xz.DIGESTS.asc 2>&1 >/dev/null |
+    grep -iP "good"'
+  when:
+    - release_fingerprint_stat.stdout == livecd_release_fingerprint
+  register: verify_digest
+  failed_when: "not 'Good signature' in verify_digest.stdout"
+  changed_when: "not 'Good signature' in verify_digest.stdout"
+  tags: ["verify_digest", "unpack_stage3"]
 
-  - name: debug - digeset asc
-    debug:
-      msg: "{{ verify_digest }}"
-    tags: ["verify_digest", "unpack_stage3"]
+- name: Debug - digeset asc
+  ansible.builtin.debug:
+    msg: "{{ verify_digest }}"
+  tags: ["verify_digest", "unpack_stage3"]
 
-  - name: Verify Digests on all files
-    shell: 'cd /mnt/gentoo/; awk "/SHA512 HASH/{getline;print}" \
-           stage3-amd64-*.tar.xz.DIGESTS.asc | sha512sum --check'
-    when: verify_digest is defined
-    changed_when: false
-    register: all_digests
-    tags: ["verify_digest", "unpack_stage3"]
-    ignore_errors: true
+- name: Verify Digests on all files
+  ansible.builtin.shell: 'cd /mnt/gentoo/; awk "/SHA512 HASH/{getline;print}" \
+         stage3-amd64-*.tar.xz.DIGESTS.asc | sha512sum --check'
+  when: verify_digest is defined
+  changed_when: false
+  register: all_digests
+  tags: ["verify_digest", "unpack_stage3"]
+  ignore_errors: true
 
-  - name: debug - all asc
-    debug:
-      msg: "{{ all_digests }}"
-    tags: ["verify_digest", "unpack_stage3"]
+- name: Debug - all asc
+  ansible.builtin.debug:
+    msg: "{{ all_digests }}"
+  tags: ["verify_digest", "unpack_stage3"]
 
-  - name: check if stage3 has been unpacked
-    stat:
-      path: /var/db/pkg
-    register: var_db_pkg
-    tags: ["verify_digest", "unpack_stage3"]
+- name: Check if stage3 has been unpacked
+  ansible.builtin.stat:
+    path: /var/db/pkg
+  register: var_db_pkg
+  tags: ["verify_digest", "unpack_stage3"]
 
-  - name: Unpack Stage3 tarball  # noqa command-instead-of-module
-    command: "tar xvJpf /mnt/gentoo/\
-              stage3-amd64-openrc-{{ livecd_stage3_date }}.tar.xz \
-              -C /mnt/gentoo \
-              --xattrs-include='*.*' --numeric-owner"
-    args:
-      warn: false
-    register: unpack_stage3
-    when:
-      - all_digests.rc == 0
-      - not var_db_pkg.stat.exists
-    tags: ["unpack_stage3"]
+- name: Unpack Stage3 tarball  # noqa command-instead-of-module
+  ansible.builtin.command: "tar xvJpf /mnt/gentoo/\
+            stage3-amd64-openrc-{{ livecd_stage3_date }}.tar.xz \
+            -C /mnt/gentoo \
+            --xattrs-include='*.*' --numeric-owner"
+  register: unpack_stage3
+  changed_when: false
+  when:
+    - all_digests.rc == 0
+    - not var_db_pkg.stat.exists
+  tags: ["unpack_stage3"]
 
-  - name: Copy .bashrc file
-    copy:
-      src: .bashrc
-      dest: /mnt/gentoo/root/
-      owner: root
-      group: root
-      mode: '0644'
-    tags: copy_files
+- name: Copy .bashrc file
+  ansible.builtin.copy:
+    src: .bashrc
+    dest: /mnt/gentoo/root/
+    owner: root
+    group: root
+    mode: '0644'
+  tags: copy_files
 
-  - name: Copy .bashrc_profile
-    copy:
-      src: /mnt/gentoo/etc/skel/.bash_profile
-      dest: /mnt/gentoo/root/
-      owner: root
-      group: root
-      mode: '0644'
-      remote_src: true
-    tags: copy_files
+- name: Copy .bashrc_profile
+  ansible.builtin.copy:
+    src: /mnt/gentoo/etc/skel/.bash_profile
+    dest: /mnt/gentoo/root/
+    owner: root
+    group: root
+    mode: '0644'
+    remote_src: true
+  tags: copy_files
 
-  - name: Slurp make.conf
-    slurp:
-      src: /mnt/gentoo/etc/portage/make.conf
-    register: slurp_make_conf
-    tags: copy_files
+- name: Slurp make.conf
+  ansible.builtin.slurp:
+    src: /mnt/gentoo/etc/portage/make.conf
+  register: slurp_make_conf
+  tags: copy_files
 
-  - name: Create make.conf file
-    template:
-      src: make.conf.j2
-      dest: /mnt/gentoo/etc/portage/make.conf
-      owner: root
-      group: root
-      mode: '0644'
-    when: "not 'GENTOO_MIRRORS' in slurp_make_conf['content'] | b64decode"
-    tags: copy_files
+- name: Create make.conf file
+  ansible.builtin.template:
+    src: make.conf.j2
+    dest: /mnt/gentoo/etc/portage/make.conf
+    owner: root
+    group: root
+    mode: '0644'
+  when: "not 'GENTOO_MIRRORS' in slurp_make_conf['content'] | b64decode"
+  tags: copy_files
 
-  - name: Setting up mirrorselect
-    shell: >
-      mirrorselect -s 3 -c "USA" -R "North America" -b 10 -D -o
-      >> /mnt/gentoo/etc/portage/make.conf
-    register: mirrors
-    when: "not 'GENTOO_MIRRORS' in slurp_make_conf['content'] | b64decode"
-    tags: copy_files
+- name: Setting up mirrorselect
+  ansible.builtin.shell: >
+    mirrorselect -s 3 -c "USA" -R "North America" -b 10 -D -o
+    >> /mnt/gentoo/etc/portage/make.conf
+  register: mirrors
+  changed_when: false
+  when: "not 'GENTOO_MIRRORS' in slurp_make_conf['content'] | b64decode"
+  tags: copy_files
 
-  - name: Portage Ver. needs to be > 2.3.42
-    shell: >
-      ls -d /mnt/gentoo/var/db/pkg/sys-apps/portage-* |
-      cut -d "/" -f8 | cut -d "-" -f2 | cut -d "." -f1,2
-    register: portage_version
-    changed_when: false
-    failed_when: portage_version.stdout|float <= 2.3
-    tags: copy_files
+- name: Portage Ver. needs to be > 2.3.42
+  ansible.builtin.shell: >
+    set -o pipefail; ls -d /mnt/gentoo/var/db/pkg/sys-apps/portage-* |
+    cut -d "/" -f8 | cut -d "-" -f2 | cut -d "." -f1,2
+  register: portage_version
+  changed_when: false
+  failed_when: portage_version.stdout|float <= 2.3
+  tags: copy_files
 
-  - name: Create repos.conf directory
-    file:
-      path: /mnt/gentoo/etc/portage/repos.conf
-      state: directory
-      mode: '0755'
-    tags: copy_files
+- name: Create repos.conf directory
+  ansible.builtin.file:
+    path: /mnt/gentoo/etc/portage/repos.conf
+    state: directory
+    mode: '0755'
+  tags: copy_files
 
-  - name: Copy gentoo.conf file (websync)
-    copy:
-      src: gentoo.conf
-      dest: /mnt/gentoo/etc/portage/repos.conf/
-      mode: 0644
-    tags: copy_files
+- name: Copy gentoo.conf file (websync)
+  ansible.builtin.copy:
+    src: gentoo.conf
+    dest: /mnt/gentoo/etc/portage/repos.conf/
+    mode: 0644
+  tags: copy_files
 
-  - name: Copy gentoo.conf file (git)
-    copy:
-      src: gentoo-git.conf
-      dest: /mnt/gentoo/
-      mode: 0644
-    tags: copy_files
+- name: Copy gentoo.conf file (git)
+  ansible.builtin.copy:
+    src: gentoo-git.conf
+    dest: /mnt/gentoo/
+    mode: 0644
+  tags: copy_files
 
-  - name: Copy /etc files
-    copy:
-      src: "{{ item }}"
-      dest: /mnt/gentoo/etc/
-      mode: 0644
-      remote_src: true
-    with_items:
-      - "/etc/resolv.conf"
-      - "/etc/wpa_supplicant/wpa_supplicant.conf"
-    tags: copy_files
+- name: Copy /etc files
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: /mnt/gentoo/etc/
+    mode: 0644
+    remote_src: true
+  with_items:
+    - "/etc/resolv.conf"
+    - "/etc/wpa_supplicant/wpa_supplicant.conf"
+  tags: copy_files
 
-  - name: Mounts prep for (chroot) - proc
-    mount:
-      path: /mnt/gentoo/proc
-      src: /proc
-      fstype: proc
-      state: mounted
-    tags: mount_chroot
+- name: Mounts prep for (chroot) - proc
+  ansible.posix.mount:
+    path: /mnt/gentoo/proc
+    src: /proc
+    fstype: proc
+    state: mounted
+  tags: mount_chroot
 
-  - name: Mounts prep for (chroot) - dev,sys
-    mount:
-      path: /mnt/gentoo/{{ item }}
-      src: /{{ item }}
-      opts: rbind,make-rslave
-      fstype: none
-      state: mounted
-    with_items:
-      - sys
-      - dev
-    tags: mount_chroot
+- name: Mounts prep for (chroot) - dev,sys
+  ansible.posix.mount:
+    path: /mnt/gentoo/{{ item }}
+    src: /{{ item }}
+    opts: rbind,make-rslave
+    fstype: none
+    state: mounted
+  with_items:
+    - sys
+    - dev
+  tags: mount_chroot
 
-  - name: setup ssh for (chroot)
-    blockinfile:
-      path: /etc/ssh/sshd_config
-      block: |
-        Match User root
-            ChrootDirectory /mnt/gentoo
-        Match all
-    register: ssh_chroot
-    notify: restart ssh
-    tags: chroot
+- name: Setup ssh for (chroot)
+  ansible.builtin.blockinfile:
+    path: /etc/ssh/sshd_config
+    block: |
+      Match User root
+          ChrootDirectory /mnt/gentoo
+      Match all
+  register: ssh_chroot
+  notify: restart ssh
+  tags: chroot
 
-  - name: Fix folders for (chroot)
-    file:
-      path: "{{ item }}"
-      state: directory
-      mode: '0755'
-    with_items:
-      - /
-      - /mnt
-      - /mnt/gentoo
-    tags: chroot
+- name: Fix folders for (chroot)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  with_items:
+    - /
+    - /mnt
+    - /mnt/gentoo
+  tags: chroot
 
-  - name: Flush Handlers
-    meta: flush_handlers
-    tags: chroot
+- name: Flush Handlers
+  ansible.builtin.meta: flush_handlers
+  tags: chroot
 
-  - name: Reset ssh connection
-    meta: reset_connection
-    tags: chroot
+- name: Reset ssh connection
+  ansible.builtin.meta: reset_connection
+  tags: chroot
 
-  - name: Wait 300 seconds for port 22 to become open and contain "OpenSSH"
-    wait_for:
-      port: 22
-      host: '{{ (ansible_ssh_host|default(ansible_host))|default(inventory_hostname) }}'
-      search_regex: OpenSSH
-      delay: 10
-    tags: chroot
+- name: Wait 300 seconds for port 22 to become open and contain "OpenSSH"
+  ansible.builtin.wait_for:
+    port: 22
+    host: '{{ (ansible_ssh_host | \
+      default(ansible_host)) | \
+      default(inventory_hostname) }}'
+    search_regex: OpenSSH
+    delay: 10
+  tags: chroot

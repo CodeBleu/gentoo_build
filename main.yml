@@ -6,12 +6,12 @@
 
   pre_tasks:
     - name: Check if requirements.yml files exists
-      stat:
+      ansible.builtin.stat:
         path: "requirements.yml"
       register: file_data
 
-    - name: install galaxy requirements
-      command: ansible-galaxy install -r requirements.yml
+    - name: Install galaxy requirements  # noqa run-once
+      ansible.builtin.command: ansible-galaxy install -r requirements.yml
       changed_when: false
       delegate_to: localhost
       run_once: true
@@ -25,8 +25,10 @@
     - {role: 'gentoo_build'}
 
   post_tasks:
-    - name: Get list of Galaxy requirement roles
-      shell: ansible-galaxy role list | grep -i '-' | grep -iv 'gentoo_build' | cut -d ',' -f1 | sed 's/- //g'
+    - name: Get list of Galaxy requirement roles  # noqa run-once
+      ansible.builtin.shell: set -o pipefail; \
+        ansible-galaxy role list | grep -i '-' | grep -iv 'gentoo_build' | \
+        cut -d ',' -f1 | sed 's/- //g'
       delegate_to: localhost
       check_mode: false
       run_once: true
@@ -34,9 +36,9 @@
       become: false
       register: galaxy_role_list
 
-    - name: remove galaxy requirements
+    - name: Remove galaxy requirements  # noqa run-once
       #
-      command: ansible-galaxy remove {{ item }}
+      ansible.builtin.command: ansible-galaxy remove {{ item }}
       #
       changed_when: false
       delegate_to: localhost
