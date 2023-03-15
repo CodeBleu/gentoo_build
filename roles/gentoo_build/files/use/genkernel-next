@@ -1,0 +1,2 @@
+# ensure we can generate a bootable kernel and initramfs
+sys-kernel/genkernel-next cryptsetup gpg plymouth

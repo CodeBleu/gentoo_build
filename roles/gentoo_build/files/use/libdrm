@@ -1,0 +1,2 @@
+# required by plymouth (kernel mode setting library)
+x11-libs/libdrm libkms

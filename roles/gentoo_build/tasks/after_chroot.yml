@@ -1,5 +1,13 @@
 ---
 
+- name: Set package keywords
+  ansible.builtin.copy:
+    src: all_keywords
+    dest: /etc/portage/package.accept_keywords
+    group: root
+    owner: root
+    mode: '0644'
+
 - name: Check if .git exists in repo path
   ansible.builtin.stat:
     path: /var/db/repos/gentoo/.git
@@ -146,6 +154,102 @@
     newuse: "true"
     sync: "yes"
   tags: profile
+
+# chapter 8 Sakaki
+- name: Create package.license directory
+  ansible.builtin.file:
+    path: /etc/portage/package.license
+    state: directory
+    owner: root
+    group: root
+    mode: '0770'
+
+- name: Licensing & Download Kernel Sources/Firmware
+  ansible.builtin.file:
+    path: /etc/portage/package.license/zzz_via_autounmask
+    state: touch
+    owner: root
+    group: root
+    mode: '0770'
+
+- name: No deblobing
+  ansible.builtin.copy:
+    content: 'sys-kernel/linux-firmware linux-fw-redistributable no-source-code'
+    dest: '/etc/portage/package.license/linux-firmware'
+    mode: '0770'
+
+- name: Install kernel sources
+  community.general.portage:
+    package: "sys-kernel/{{ livecd_kernel_sources }}"
+    state: present
+
+- name: Setup genpi-tools (sakaki replacement) repo
+  ansible.builtin.copy:
+    src: genpi-tools.conf
+    dest: /etc/portage/repos.conf
+    group: root
+    owner: root
+    mode: '0644'
+
+- name: Sync genpi-tools repo
+  ansible.builtin.command: "emaint sync --repo genpi-tools"
+  changed_when: false
+
+- name: Create env,package.env dir
+  ansible.builtin.file:
+    path: /etc/portage/{{ item }}
+    state: directory
+    owner: root
+    group: root
+    mode: '0644'
+  with_items:
+    - env
+    - package.env
+
+- name: Copy serialize-make.conf file
+  ansible.builtin.copy:
+    src: serialize-make.conf
+    dest: /etc/portage/env
+    group: root
+    owner: root
+    mode: '0644'
+
+- name: Copy efitools env file
+  ansible.builtin.copy:
+    src: efitools
+    dest: /etc/portage/package.env
+    group: root
+    owner: root
+    mode: '0644'
+
+- name: Copy USE files
+  ansible.builtin.copy:
+    src: "use/{{ item }}"
+    dest: /etc/portage/package.use
+    group: root
+    owner: root
+    mode: '0644'
+  with_items:
+    - plymouth
+    - gdm
+    - libdrm
+    - genkernel-next
+
+- name: Select kernel ( eselect )
+  ansible.builtin.command: eselect kernel set 1
+  changed_when: false
+
+- name: Install genpi packages
+  ansible.builtin.package:
+    name: "{{ item }}"
+    state: present
+  with_items:
+    - sys-kernel/genkernel-next
+    - sys-boot/plymouth
+    - x11-libs/libdrm
+    - app-crypt/efitools
+    - app-portage/showem
+    - sys-kernel/buildkernel
 
 - name: Test eselect in (chroot)
   ansible.builtin.command: eselect news list

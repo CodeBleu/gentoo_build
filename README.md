@@ -47,6 +47,10 @@ livecd ~#: `passwd`
 
     livecd ansible_host=<ip> ansible_user=root ansible_ssh_pipelining=False
 
+### Misc. Notes
+Issues with genkernel not compiling and issue was because `algif_skcipher` was missing in kernel.
+Use `cryptsetup benchmark` to check for issues.
+
 
 Role Variables
 --------------

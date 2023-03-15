@@ -1,0 +1,2 @@
+# for a smooth transition to GNOME
+sys-boot/plymouth gdm libkms
