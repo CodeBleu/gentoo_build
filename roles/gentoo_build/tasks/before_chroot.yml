@@ -253,20 +253,20 @@
     var: primary_partuuid
   tags: uuid
 
-- name: Downloading, Verifying and Unpacking the Gentoo Stage 3 Tarball
-  ansible.builtin.get_url:
-    url: "{{ livecd_stage3_url }}/{{ livecd_stage3_date }}/{{ item }}"
-    dest: /mnt/gentoo/{{ item }}
-    mode: '0755'
-  with_items:
-    - stage3-amd64-openrc-{{ livecd_stage3_date }}.tar.xz.DIGESTS
-    - stage3-amd64-openrc-{{ livecd_stage3_date }}.tar.xz.DIGESTS.asc
-    - stage3-amd64-openrc-{{ livecd_stage3_date }}.tar.xz.CONTENTS.gz
-    - stage3-amd64-openrc-{{ livecd_stage3_date }}.tar.xz
-  register: download_stuff
-  loop_control:
-    pause: 10
-  tags: download_stage3
+# - name: Downloading, Verifying and Unpacking the Gentoo Stage 3 Tarball
+#   ansible.builtin.get_url:
+#     url: "{{ livecd_stage3_url }}/{{ livecd_stage3_date }}/{{ item }}"
+#     dest: /mnt/gentoo/{{ item }}
+#     mode: '0755'
+#   with_items:
+#     - stage3-amd64-openrc-{{ livecd_stage3_date }}.tar.xz.DIGESTS
+#     - stage3-amd64-openrc-{{ livecd_stage3_date }}.tar.xz.asc
+#     - stage3-amd64-openrc-{{ livecd_stage3_date }}.tar.xz.CONTENTS.gz
+#     - stage3-amd64-openrc-{{ livecd_stage3_date }}.tar.xz
+#   register: download_stuff
+#   loop_control:
+#     pause: 10
+#   tags: download_stage3
 
 # https://www.gentoo.org/downloads/signatures/
 - name: Install Gentoo weekly release public key
@@ -286,7 +286,7 @@
 - name: Verify DIGESTS.asc file
   ansible.builtin.shell: 'set -o pipefail;
     gpg --verify /mnt/gentoo/stage3-amd64-openrc-{{
-    livecd_stage3_date }}.tar.xz.DIGESTS.asc 2>&1 >/dev/null |
+    livecd_stage3_date }}.tar.xz.asc 2>&1 >/dev/null |
     grep -iP "good"'
   when:
     - release_fingerprint_stat.stdout == livecd_release_fingerprint
@@ -302,7 +302,7 @@
 
 - name: Verify Digests on all files
   ansible.builtin.shell: 'cd /mnt/gentoo/; awk "/SHA512 HASH/{getline;print}" \
-         stage3-amd64-*.tar.xz.DIGESTS.asc | sha512sum --check'
+         stage3-amd64-*.tar.xz.DIGESTS | sha512sum --check'
   when: verify_digest is defined
   changed_when: false
   register: all_digests
